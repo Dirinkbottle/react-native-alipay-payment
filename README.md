@@ -39,7 +39,7 @@ dependencies {
 
 ## iOS配置
 
-// TODO: 添加iOS配置说明
+// TODO: 暂不支持ios
 
 ## 使用方法
 
