@@ -1,0 +1,37 @@
+{
+  "name": "react-native-alipay-payment",
+  "version": "1.0.2",
+  "description": "支付宝支付功能的React Native模块",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "react-native",
+    "alipay",
+    "payment"
+  ],
+  "author": "dirinkbottle",
+  "license": "MIT",
+  "peerDependencies": {
+    "react": "*",
+    "react-native": "*"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.8",
+    "@types/react-native": "^0.70.19",
+    "axios": "^1.10.0",
+    "typescript": "^4.9.0"
+  },
+  "dependencies": {
+    "axios": "^1.10.0"
+  },
+  "files": [
+    "lib/**/*",
+    "android/**/*",
+    "ios/**/*",
+    "README.md"
+  ]
+}
