@@ -52,6 +52,19 @@ export declare class PaymentService {
      * @returns Promise<any> - 订单状态查询结果
      */
     queryOrderStatus(orderSn: string): Promise<any>;
+    /**
+     * 获取支付结果消息
+     * @param resultStatus - 结果状态码
+     * @returns string - 提示消息
+     */
+    private getPaymentMessage;
 }
-export declare const AlipayConstants: any;
+export declare const AlipayConstants: {
+    SUCCESS: string;
+    PROCESSING: string;
+    FAILED: string;
+    CANCEL: string;
+    NETWORK_ERROR: string;
+    UNKNOWN: string;
+};
 export default PaymentService;

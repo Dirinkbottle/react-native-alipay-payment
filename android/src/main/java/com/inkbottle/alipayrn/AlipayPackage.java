@@ -1,4 +1,4 @@
-package com.inkbottle.buyeveryday;
+package com.inkbottle.alipayrn;
 
 import androidx.annotation.NonNull;
 
