@@ -32,5 +32,7 @@ repositories {
 
 dependencies {
     compile 'com.facebook.react:react-native:+'
+    //支付宝
+      api 'com.alipay.sdk:alipaysdk-android:+@aar'
 }
   
