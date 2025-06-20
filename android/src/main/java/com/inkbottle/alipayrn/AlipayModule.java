@@ -36,6 +36,7 @@ public class AlipayModule extends ReactContextBaseJavaModule {
     private boolean isPaymentInProgress = false;
     private long lastPaymentTime = 0;
     private boolean isSandboxMode = false;
+    private boolean isDebugMode = false;
     
     // 活动监听器，用于处理支付宝回调
     private final ActivityEventListener activityEventListener = new BaseActivityEventListener() {
@@ -117,15 +118,17 @@ public class AlipayModule extends ReactContextBaseJavaModule {
             @Override
             public void handleMessage(Message msg) {
                 // 标记支付已结束
-                isPaymentInProgress = false;
+                resetPaymentStateInternal();
+                Log.d(TAG, "支付回调后自动重置支付状态");
                 
                 if (msg.what == SDK_PAY_FLAG) {
                     @SuppressWarnings("unchecked")
                     Map<String, String> result = (Map<String, String>) msg.obj;
                     
-                    WritableMap map = Arguments.createMap();
+                    // 先为事件创建一个WritableMap
+                    WritableMap eventMap = Arguments.createMap();
                     for (Map.Entry<String, String> entry : result.entrySet()) {
-                        map.putString(entry.getKey(), entry.getValue());
+                        eventMap.putString(entry.getKey(), entry.getValue());
                     }
                     
                     // 判断支付结果
@@ -133,10 +136,16 @@ public class AlipayModule extends ReactContextBaseJavaModule {
                     Log.d(TAG, "支付宝返回状态码: " + resultStatus);
                     
                     // 发送支付结果事件
-                    sendEvent("AlipayPaymentResult", map);
+                    sendEvent("AlipayPaymentResult", eventMap);
+                    
+                    // 为Promise创建另一个新的WritableMap
+                    WritableMap promiseMap = Arguments.createMap();
+                    for (Map.Entry<String, String> entry : result.entrySet()) {
+                        promiseMap.putString(entry.getKey(), entry.getValue());
+                    }
                     
                     // 无论成功失败，都通过resolve返回结果，让JS层来处理
-                    promise.resolve(map);
+                    promise.resolve(promiseMap);
                 }
             }
         };
@@ -161,7 +170,7 @@ public class AlipayModule extends ReactContextBaseJavaModule {
                     handler.sendMessage(msg);
                 } catch (Exception e) {
                     Log.e(TAG, "支付过程异常: " + e.getMessage());
-                    isPaymentInProgress = false;
+                    resetPaymentStateInternal();
                     
                     // 构建错误信息
                     HashMap<String, String> errorResult = new HashMap<>();
@@ -230,6 +239,8 @@ public class AlipayModule extends ReactContextBaseJavaModule {
                     errorResult.put("resultStatus", "4000");
                     errorResult.put("memo", "授权过程出现异常: " + e.getMessage());
                     
+                    resetPaymentStateInternal();
+                    
                     Message msg = new Message();
                     msg.what = SDK_AUTH_FLAG;
                     msg.obj = errorResult;
@@ -262,6 +273,16 @@ public class AlipayModule extends ReactContextBaseJavaModule {
             Log.e(TAG, "设置环境失败: " + e.getMessage());
             promise.reject("ENV_SETTING_ERROR", "设置环境失败: " + e.getMessage());
         }
+    }
+    
+    /**
+     * 获取当前沙箱模式状态
+     * 
+     * @param promise 回调Promise
+     */
+    @ReactMethod
+    public void isSandboxEnabled(final Promise promise) {
+        promise.resolve(this.isSandboxMode);
     }
     
     /**
@@ -316,8 +337,7 @@ public class AlipayModule extends ReactContextBaseJavaModule {
     @ReactMethod
     public void resetPaymentState(final Promise promise) {
         Log.d(TAG, "手动重置支付状态");
-        isPaymentInProgress = false;
-        lastPaymentTime = 0;
+        resetPaymentStateInternal();
         promise.resolve(true);
     }
     
@@ -354,5 +374,130 @@ public class AlipayModule extends ReactContextBaseJavaModule {
         // 在组件卸载时移除监听器
         reactContext.removeActivityEventListener(activityEventListener);
         super.invalidate();
+    }
+
+    /**
+     * 启用或禁用调试模式，在调试模式下会输出更多日志
+     *
+     * @param enabled 是否启用调试模式
+     * @param promise 回调Promise
+     */
+    @ReactMethod
+    public void setDebugMode(final boolean enabled, final Promise promise) {
+        this.isDebugMode = enabled;
+        Log.d(TAG, "调试模式已" + (enabled ? "启用" : "禁用"));
+        promise.resolve(enabled);
+    }
+
+    /**
+     * 记录调试日志
+     * 
+     * @param level 日志级别 ("debug", "info", "warn", "error")
+     * @param message 日志内容
+     * @param promise 回调Promise
+     */
+    @ReactMethod
+    public void logDebugInfo(final String level, final String message, final Promise promise) {
+        if (!this.isDebugMode) {
+            promise.resolve(false);
+            return;
+        }
+        
+        switch (level.toLowerCase()) {
+            case "debug":
+                Log.d(TAG, message);
+                break;
+            case "info":
+                Log.i(TAG, message);
+                break;
+            case "warn":
+                Log.w(TAG, message);
+                break;
+            case "error":
+                Log.e(TAG, message);
+                break;
+            default:
+                Log.d(TAG, message);
+        }
+        
+        promise.resolve(true);
+    }
+
+    /**
+     * 获取调试信息，包括设备信息、支付宝SDK版本等
+     * 
+     * @param promise 回调Promise
+     */
+    @ReactMethod
+    public void getDebugInfo(final Promise promise) {
+        try {
+            final Activity currentActivity = getCurrentActivity();
+            
+            // 创建调试信息对象
+            WritableMap debugInfo = Arguments.createMap();
+            
+            // 设备信息
+            debugInfo.putString("device", android.os.Build.DEVICE);
+            debugInfo.putString("model", android.os.Build.MODEL);
+            debugInfo.putString("manufacturer", android.os.Build.MANUFACTURER);
+            debugInfo.putString("androidVersion", android.os.Build.VERSION.RELEASE);
+            debugInfo.putInt("androidSDKInt", android.os.Build.VERSION.SDK_INT);
+            
+            // 应用信息
+            if (currentActivity != null) {
+                try {
+                    String packageName = currentActivity.getPackageName();
+                    String appVersionName = currentActivity.getPackageManager()
+                            .getPackageInfo(packageName, 0).versionName;
+                    int appVersionCode;
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                        appVersionCode = (int) currentActivity.getPackageManager()
+                                .getPackageInfo(packageName, 0).getLongVersionCode();
+                    } else {
+                        appVersionCode = currentActivity.getPackageManager()
+                                .getPackageInfo(packageName, 0).versionCode;
+                    }
+                    
+                    debugInfo.putString("packageName", packageName);
+                    debugInfo.putString("appVersionName", appVersionName);
+                    debugInfo.putInt("appVersionCode", appVersionCode);
+                } catch (Exception e) {
+                    debugInfo.putString("appInfoError", e.getMessage());
+                }
+            }
+            
+            // 支付宝状态信息
+            debugInfo.putBoolean("sandboxMode", isSandboxMode);
+            debugInfo.putBoolean("paymentInProgress", isPaymentInProgress);
+            debugInfo.putDouble("lastPaymentTime", lastPaymentTime);
+            
+            // 支付宝SDK相关信息
+            if (currentActivity != null) {
+                try {
+                    PayTask payTask = new PayTask(currentActivity);
+                    String version = payTask.getVersion();
+                    boolean isAlipayInstalled = version != null && !version.isEmpty();
+                    
+                    debugInfo.putBoolean("alipayInstalled", isAlipayInstalled);
+                    debugInfo.putString("alipayVersion", version != null ? version : "未安装");
+                } catch (Exception e) {
+                    debugInfo.putString("alipayError", e.getMessage());
+                }
+            }
+            
+            promise.resolve(debugInfo);
+        } catch (Exception e) {
+            promise.reject("GET_DEBUG_INFO_ERROR", "获取调试信息失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 内部方法：重置支付状态所有变量
+     * 在支付完成/错误/取消等所有情况后都会调用
+     */
+    private void resetPaymentStateInternal() {
+        isPaymentInProgress = false;
+        lastPaymentTime = 0;
+        Log.d(TAG, "支付状态已重置");
     }
 } 

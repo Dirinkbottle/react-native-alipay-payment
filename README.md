@@ -145,6 +145,27 @@ AlipayPayment.payWithResult(orderInfo)
   });
 ```
 
+### 沙箱模式管理
+
+```javascript
+// 开启沙箱模式(仅用于开发测试)
+AlipayPayment.setSandboxMode(true)
+  .then(() => console.log('已切换到沙箱环境'))
+  .catch(error => console.error('切换环境失败:', error));
+
+// 切换到正式环境
+AlipayPayment.setSandboxMode(false)
+  .then(() => console.log('已切换到正式环境'))
+  .catch(error => console.error('切换环境失败:', error));
+
+// 查询当前沙箱模式状态
+AlipayPayment.isSandboxEnabled()
+  .then(isEnabled => {
+    console.log(`当前${isEnabled ? '处于' : '不处于'}沙箱模式`);
+  })
+  .catch(error => console.error('查询沙箱模式失败:', error));
+```
+
 ### 使用PaymentService服务类
 
 ```typescript
@@ -180,20 +201,6 @@ const payOrder = async () => {
 };
 ```
 
-### 切换沙箱环境
-
-```javascript
-// 开启沙箱模式(仅用于开发测试)
-AlipayPayment.setSandboxMode(true)
-  .then(() => console.log('已切换到沙箱环境'))
-  .catch(error => console.error('切换环境失败:', error));
-
-// 切换到正式环境
-AlipayPayment.setSandboxMode(false)
-  .then(() => console.log('已切换到正式环境'))
-  .catch(error => console.error('切换环境失败:', error));
-```
-
 ### 检查支付宝是否安装
 
 ```javascript
@@ -216,6 +223,22 @@ AlipayPayment.getAlipayVersion()
   })
   .catch(error => {
     console.error('获取版本失败:', error);
+  });
+```
+
+### 支付状态管理
+
+模块内部已实现支付状态自动管理机制，每次支付完成后(无论成功、失败或取消)都会自动重置支付状态，无需手动调用重置方法。
+
+```javascript
+// 通常情况下无需手动重置支付状态
+// 仅在特殊情况下（如支付状态异常）才需要手动重置
+AlipayPayment.resetPaymentState()
+  .then(() => {
+    console.log('已手动重置支付状态');
+  })
+  .catch(error => {
+    console.error('重置状态失败:', error);
   });
 ```
 
@@ -266,6 +289,16 @@ AlipayPayment.getAlipayVersion()
 - 支付结果应与服务器进行二次确认
 
 ## 版本记录
+-1.1.3
+ -在AlipayModule.java中添加了resetPaymentStateInternal()私有方法，统一重置所有状态变量
+ -在支付回调、异常处理和授权异常的所有路径中都调用了状态重置
+ -重置过程会记录日志，便于调试
+-1.1.2
+  -修复consummap重复使用
+  -修复回调闪退
+- 1.1.1:
+  - 新增 `isSandboxEnabled` API 用于查询当前沙箱模式状态
+  - 更新示例代码，提供沙箱模式管理示例
 
 - 1.1.0:
   - 修复了无法调起支付宝的问题
