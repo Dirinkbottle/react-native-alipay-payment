@@ -27,7 +27,10 @@ import com.facebook.react.modules.core.DeviceEventManagerModule;
 import java.util.HashMap;
 import java.util.Map;
 
+
+
 public class AlipayModule extends ReactContextBaseJavaModule {
+    private static final int ALIPAY_SDK_REQUEST_CODE = 10000; // 支付宝SDK回调请求码
     private static final String TAG = "AlipayModule";
     private static final int SDK_PAY_FLAG = 1;
     private static final int SDK_AUTH_FLAG = 2;
@@ -39,13 +42,78 @@ public class AlipayModule extends ReactContextBaseJavaModule {
     private boolean isDebugMode = false;
     
     // 活动监听器，用于处理支付宝回调
-    private final ActivityEventListener activityEventListener = new BaseActivityEventListener() {
-        @Override
-        public void onActivityResult(Activity activity, int requestCode, int resultCode, Intent data) {
-            // 支付宝SDK回调处理
-            Log.d(TAG, "支付宝活动回调: requestCode=" + requestCode + ", resultCode=" + resultCode);
-        }
-    };
+        private final ActivityEventListener activityEventListener = new BaseActivityEventListener() {
+            @Override
+            public void onActivityResult(Activity activity, int requestCode, int resultCode, Intent data) {
+                Log.d(TAG, "支付宝活动回调: requestCode=" + requestCode + ", resultCode=" + resultCode);
+                    // 获取当前Activity
+                 final Activity currentActivity = getCurrentActivity();
+    
+                // 检查是否是支付宝SDK的回调
+                if (requestCode == ALIPAY_SDK_REQUEST_CODE) {
+                    if (data == null) {
+                        Log.e(TAG, "支付宝回调数据为空");
+                        
+                        // 处理空数据情况
+                        HashMap<String, String> errorResult = new HashMap<>();
+                        errorResult.put("resultStatus", "6002"); // 网络错误
+                        errorResult.put("memo", "支付宝返回数据为空");
+                        errorResult.put("result", "");
+                        
+                        // 发送事件通知
+                        WritableMap eventMap = Arguments.createMap();
+                        for (Map.Entry<String, String> entry : errorResult.entrySet()) {
+                            eventMap.putString(entry.getKey(), entry.getValue());
+                        }
+                        sendEvent("AlipayPaymentResult", eventMap);
+                        
+                        // 重置支付状态
+                        resetPaymentStateInternal();
+                        return;
+                    }
+                    
+                    // 从Intent中提取支付结果
+                    String resultData = data.getStringExtra("result");
+                    String resultStatus = data.getStringExtra("resultStatus");
+                    String memo = data.getStringExtra("memo");
+                    
+                    // 如果resultStatus为空，可能是旧版本SDK，尝试提取resultStatus
+                    if (resultStatus == null && resultData != null) {
+                        // 尝试从result中解析状态码
+                        if (resultData.contains("resultStatus={")) {
+                            int start = resultData.indexOf("resultStatus={") + 13;
+                            int end = resultData.indexOf("}", start);
+                            if (end > start) {
+                                resultStatus = resultData.substring(start, end);
+                            }
+                        }
+                        
+                        // 如果仍然为空，设置为未知错误
+                        if (resultStatus == null) {
+                            resultStatus = "6004"; // 未知错误
+                        }
+                    }
+                    
+                    // 构建结果Map
+                    HashMap<String, String> result = new HashMap<>();
+                    result.put("resultStatus", resultStatus != null ? resultStatus : "6004");
+                    result.put("result", resultData != null ? resultData : "");
+                    result.put("memo", memo != null ? memo : "");
+                    
+                    // 发送事件通知
+                    WritableMap eventMap = Arguments.createMap();
+                    for (Map.Entry<String, String> entry : result.entrySet()) {
+                        eventMap.putString(entry.getKey(), entry.getValue());
+                    }
+                    sendEvent("AlipayPaymentResult", eventMap);
+                    
+                    // 重置支付状态
+                    resetPaymentStateInternal();
+                    
+                    Log.d(TAG, "支付宝回调已处理: resultStatus=" + resultStatus);
+                }
+            }
+        };
 
     public AlipayModule(ReactApplicationContext reactContext) {
         super(reactContext);
@@ -75,7 +143,14 @@ public class AlipayModule extends ReactContextBaseJavaModule {
     @ReactMethod
     public void pay(final String orderInfo, final Promise promise) {
         Log.d(TAG, "发起支付宝支付请求，订单长度: " + orderInfo.length());
-        
+
+        // 获取当前Activity
+        final Activity currentActivity = getCurrentActivity();
+        if (currentActivity == null) {
+            promise.reject("ERR_ACTIVITY_NOT_FOUND", "Activity不存在");
+            return;
+        }
+
         // 空订单检查
         if (TextUtils.isEmpty(orderInfo)) {
             promise.reject("ERR_EMPTY_ORDER", "支付参数不能为空");
@@ -97,24 +172,7 @@ public class AlipayModule extends ReactContextBaseJavaModule {
             }
         }
         
-        final Activity currentActivity = getCurrentActivity();
-        if (currentActivity == null) {
-            promise.reject("ERR_ACTIVITY_NOT_FOUND", "Activity不存在");
-            return;
-        }
-        
-        // 标记支付开始
-        isPaymentInProgress = true;
-        lastPaymentTime = System.currentTimeMillis();
-        
-        // 设置沙箱环境（如果启用了）
-        if (isSandboxMode) {
-            EnvUtils.setEnv(EnvUtils.EnvEnum.SANDBOX);
-        } else {
-            EnvUtils.setEnv(EnvUtils.EnvEnum.ONLINE);
-        }
-        
-        final Handler handler = new Handler(Looper.getMainLooper()) {
+            final Handler handler = new Handler(Looper.getMainLooper()) {
             @Override
             public void handleMessage(Message msg) {
                 // 标记支付已结束
@@ -125,15 +183,15 @@ public class AlipayModule extends ReactContextBaseJavaModule {
                     @SuppressWarnings("unchecked")
                     Map<String, String> result = (Map<String, String>) msg.obj;
                     
-                    // 先为事件创建一个WritableMap
+                    // 某些情况下支付结果可能通过onActivityResult返回
+                    // 所以需要检查是否已经处理过这个结果
+                    String resultStatus = result.get("resultStatus");
+                    
+                    // 为事件创建一个WritableMap
                     WritableMap eventMap = Arguments.createMap();
                     for (Map.Entry<String, String> entry : result.entrySet()) {
                         eventMap.putString(entry.getKey(), entry.getValue());
                     }
-                    
-                    // 判断支付结果
-                    String resultStatus = result.get("resultStatus");
-                    Log.d(TAG, "支付宝返回状态码: " + resultStatus);
                     
                     // 发送支付结果事件
                     sendEvent("AlipayPaymentResult", eventMap);
@@ -144,7 +202,7 @@ public class AlipayModule extends ReactContextBaseJavaModule {
                         promiseMap.putString(entry.getKey(), entry.getValue());
                     }
                     
-                    // 无论成功失败，都通过resolve返回结果，让JS层来处理
+                    // 无论成功失败，都通过resolve返回结果
                     promise.resolve(promiseMap);
                 }
             }

@@ -1,17 +1,14 @@
 // src/AlipayService.ts
-import axios from 'axios';
-// 使用NativeModules直接导入
-import { NativeModules } from 'react-native';
+
+// 使用NativeModules和DeviceEventEmitter
+import { NativeModules, DeviceEventEmitter, EmitterSubscription } from 'react-native';
 
 // 直接使用NativeModules
 const AlipayModule = NativeModules.AlipayModule;
 
-interface OrderParams {
-  productId: string;
-  quantity: number;
-  charge?: number;
-  reqtype: number; // 0: 商品购买, 1: 钱包充值
-}
+// 回调函数类型定义
+export type PaymentCallback = (result: PaymentResponse) => void;
+
 
 interface PaymentResponse {
   success: boolean;
@@ -20,30 +17,118 @@ interface PaymentResponse {
   message?: string;
   resultStatus?: string;
   orderSn?: string;
+  result?: string;
+  memo?: string;
+  rawResult?: any;
 }
 
-interface ServerPaymentConfig {
-  apiUrl: string;
-  token: string;
-}
 
 /**
  * 支付宝支付服务，处理业务层面的支付逻辑
  */
 export class PaymentService {
-  private apiUrl: string;
-  private token: string;
   private useSandbox: boolean;
+  private eventListener: EmitterSubscription | null = null;
+  private paymentCallbacks: PaymentCallback[] = [];
   
   /**
    * 支付服务构造函数
    * @param config - 服务器支付配置
    * @param useSandbox - 是否使用沙箱环境
    */
-  constructor(config: ServerPaymentConfig, useSandbox: boolean = false) {
-    this.apiUrl = config.apiUrl;
-    this.token = config.token;
+  constructor(useSandbox: boolean = false) {
     this.useSandbox = useSandbox;
+    
+    // 设置事件监听
+    this.setupEventListener();
+  }
+  
+  /**
+   * 设置支付宝支付结果事件监听
+   */
+  private setupEventListener(): void {
+    // 先移除之前可能存在的监听器
+    this.removeEventListener();
+    
+    // 添加新的事件监听器
+    this.eventListener = DeviceEventEmitter.addListener(
+      'AlipayPaymentResult',
+      (result) => {
+        console.log('收到支付宝支付结果事件:', result);
+        
+        // 转换为标准PaymentResponse格式
+        const paymentResponse: PaymentResponse = this.formatPaymentResult(result);
+        
+        // 通知所有注册的回调
+        this.notifyCallbacks(paymentResponse);
+      }
+    );
+  }
+  
+  /**
+   * 移除事件监听器
+   */
+  public removeEventListener(): void {
+    if (this.eventListener) {
+      this.eventListener.remove();
+      this.eventListener = null;
+    }
+  }
+  
+  /**
+   * 添加支付结果回调
+   * @param callback - 支付结果回调函数
+   */
+  public addPaymentCallback(callback: PaymentCallback): void {
+    this.paymentCallbacks.push(callback);
+  }
+  
+  /**
+   * 移除支付结果回调
+   * @param callback - 要移除的回调函数
+   */
+  public removePaymentCallback(callback: PaymentCallback): void {
+    const index = this.paymentCallbacks.indexOf(callback);
+    if (index !== -1) {
+      this.paymentCallbacks.splice(index, 1);
+    }
+  }
+  
+  /**
+   * 通知所有注册的回调
+   * @param result - 支付结果
+   */
+  private notifyCallbacks(result: PaymentResponse): void {
+    this.paymentCallbacks.forEach(callback => {
+      try {
+        callback(result);
+      } catch (error) {
+        console.error("支付回调执行异常:", error);
+      }
+    });
+  }
+  
+  /**
+   * 格式化支付结果
+   * @param result - 原始支付结果
+   * @returns 格式化后的支付结果
+   */
+  private formatPaymentResult(result: any): PaymentResponse {
+    const resultStatus = result.resultStatus;
+    const success = resultStatus === '9000';
+    const processing = resultStatus === '8000';
+    const cancelled = resultStatus === '6001';
+    
+    return {
+      success,
+      processing,
+      cancelled,
+      message: this.getPaymentMessage(resultStatus),
+      resultStatus: resultStatus,
+      result: result.result,
+      memo: result.memo,
+      rawResult: result
+    };
   }
   
   /**
@@ -71,107 +156,40 @@ export class PaymentService {
   /**
    * 使用订单字符串直接支付
    * @param orderString - 完整的支付宝订单参数字符串
+   * @param callback - 可选的回调函数，用于接收事件方式的结果通知
    * @returns Promise<PaymentResponse> - 支付结果
    */
-  async payWithOrderString(orderString: string): Promise<PaymentResponse> {
+  async payWithOrderString(
+    orderString: string, 
+    callback?: PaymentCallback
+  ): Promise<PaymentResponse> {
     try {
+      // 如果提供了回调函数，添加到回调列表
+      if (callback) {
+        this.addPaymentCallback(callback);
+      }
+      
       // 直接调用支付宝支付
       const result = await AlipayModule.pay(orderString);
       
-      // 判断结果状态
-      const success = result.resultStatus === '9000';
-      const processing = result.resultStatus === '8000';
-      const cancelled = result.resultStatus === '6001';
-      
-      return {
-        success,
-        processing,
-        cancelled,
-        message: this.getPaymentMessage(result.resultStatus),
-        resultStatus: result.resultStatus
-      };
+      // 格式化结果
+      return this.formatPaymentResult(result);
     } catch (error: any) {
-      return {
+      const errorResponse: PaymentResponse = {
         success: false,
         message: error?.message || '支付过程出错'
       };
-    }
-  }
-  
-  /**
-   * 创建订单并支付（完整流程）
-   * @param params - 订单参数
-   * @returns Promise<PaymentResponse> - 支付结果
-   */
-  async createOrderAndPay(params: OrderParams): Promise<PaymentResponse> {
-    try {
-      // 1. 确保环境已初始化
-      await this.initialize();
       
-      // 2. 从服务器获取支付宝订单信息
-      const headers = {
-        'Authorization': `Bearer ${this.token}`,
-        'Content-Type': 'application/json'
-      };
-      
-      const response = await axios.post(
-        `${this.apiUrl}/api/payment/alipay`,
-        {
-          reqtype: params.reqtype,
-          productId: params.productId,
-          sumbuy: params.quantity,
-          charge: params.charge
-        },
-        { headers }
-      );
-      
-      if (!response.data || !response.data.success) {
-        throw new Error(response.data?.message || '获取支付信息失败');
+      // 如果是事件方式的回调，也发送错误通知
+      if (callback) {
+        setTimeout(() => {
+          this.notifyCallbacks(errorResponse);
+          // 调用完成后移除一次性回调
+          this.removePaymentCallback(callback);
+        }, 0);
       }
       
-      // 3. 从服务器响应中提取orderStr和orderSn
-      const orderStr = response.data.result;
-      const orderSn = response.data.orderSn;
-      
-      if (!orderStr) {
-        throw new Error('支付参数(orderStr)为空');
-      }
-      
-      // 4. 调用支付宝SDK进行支付
-      const result = await this.payWithOrderString(orderStr);
-      
-      return {
-        ...result,
-        orderSn
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        message: error?.message || '支付过程出错'
-      };
-    }
-  }
-  
-  /**
-   * 查询订单状态
-   * @param orderSn - 订单号
-   * @returns Promise<any> - 订单状态查询结果
-   */
-  async queryOrderStatus(orderSn: string): Promise<any> {
-    try {
-      const headers = {
-        'Authorization': `Bearer ${this.token}`,
-        'Content-Type': 'application/json'
-      };
-      
-      const response = await axios.get(
-        `${this.apiUrl}/api/payment/query/${orderSn}`,
-        { headers }
-      );
-      
-      return response.data;
-    } catch (error) {
-      throw error;
+      return errorResponse;
     }
   }
   
@@ -196,6 +214,15 @@ export class PaymentService {
       default:
         return '未知错误';
     }
+  }
+  
+  /**
+   * 清理资源
+   * 在组件卸载时调用此方法
+   */
+  public cleanup(): void {
+    this.removeEventListener();
+    this.paymentCallbacks = [];
   }
 }
 

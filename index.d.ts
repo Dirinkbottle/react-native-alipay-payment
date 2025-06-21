@@ -84,6 +84,72 @@ declare module 'react-native-alipay-payment' {
     isValid: boolean;        // 是否有效
     missingFields: string[]; // 缺失字段列表
   }
+  
+  /**
+   * 支付结果响应
+   */
+  export interface PaymentResponse {
+    success: boolean;        // 是否支付成功
+    processing?: boolean;    // 是否处理中
+    cancelled?: boolean;     // 是否被取消
+    message?: string;        // 结果消息
+    resultStatus?: string;   // 结果状态码
+    orderSn?: string;        // 订单号
+    result?: string;         // 原始结果数据
+    memo?: string;           // 备注信息
+  }
+  
+  /**
+   * 回调函数类型定义
+   */
+  export type PaymentCallback = (result: PaymentResponse) => void;
+  
+  /**
+   * 支付宝支付服务类
+   */
+  export class PaymentService {
+    /**
+     * 支付服务构造函数
+     * @param useSandbox - 是否使用沙箱环境
+     */
+    constructor(useSandbox?: boolean);
+    
+    /**
+     * 初始化支付环境
+     * @returns 是否初始化成功
+     */
+    initialize(): Promise<boolean>;
+    
+    /**
+     * 使用订单字符串直接支付
+     * @param orderString 完整的支付宝订单参数字符串
+     * @param callback 可选的回调函数
+     * @returns 支付结果
+     */
+    payWithOrderString(orderString: string, callback?: PaymentCallback): Promise<PaymentResponse>;
+    
+    /**
+     * 添加支付结果回调
+     * @param callback 支付结果回调函数
+     */
+    addPaymentCallback(callback: PaymentCallback): void;
+    
+    /**
+     * 移除支付结果回调
+     * @param callback 要移除的回调函数
+     */
+    removePaymentCallback(callback: PaymentCallback): void;
+    
+    /**
+     * 移除事件监听器
+     */
+    removeEventListener(): void;
+    
+    /**
+     * 清理资源
+     */
+    cleanup(): void;
+  }
 
   const AlipayPayment: {
     /**
