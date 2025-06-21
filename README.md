@@ -65,6 +65,9 @@ AlipayPayment.payWithResult(orderInfo)
 ### 环境配置
 
 ```javascript
+//开启debug输出
+AlipayPayment.setDebugMode(true);
+
 // 开启沙箱模式(开发测试用)
 await AlipayPayment.setSandboxMode(true);
 
