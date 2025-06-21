@@ -4,7 +4,7 @@
 
 # React Native Alipay 支付模块
 
-适用于React Native项目的支付宝支付集成模块，支持Android平台。
+React Native 支付宝支付模块，支持Android平台，提供完整的支付流程管理、事件回调机制、沙箱/正式环境切换、错误处理和格式化，以及TypeScript类型支持。集成简便，使用灵活，适用于需要接入支付宝App支付功能的React Native应用。
 
 ## 特性
 
