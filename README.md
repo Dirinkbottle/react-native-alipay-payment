@@ -21,28 +21,8 @@ npm install react-native-alipay-payment --save
 ```
 
 ## 权限设置
+模块内置满足运行的权限，额外权限请自行添加
 
-模块已经在 AndroidManifest.xml 中包含了基本权限，并内置了运行时权限请求功能。使用方法：
-
-```javascript
-import AlipayPayment from 'react-native-alipay-payment';
-
-// 请求支付宝所需的敏感权限（Android 6.0+需要）
-AlipayPayment.requestPermissions()
-  .then(result => {
-    // result: {READ_PHONE_STATE: 'granted|denied', WRITE_EXTERNAL_STORAGE: 'granted|denied'}
-    console.log('权限请求结果:', result);
-    
-    // 检查所有权限是否都已授予
-    const allGranted = Object.values(result).every(status => status === 'granted');
-    if (allGranted) {
-      console.log('所有权限已授予，可以进行支付');
-    } else {
-      console.log('部分权限被拒绝，支付可能受影响');
-    }
-  })
-  .catch(error => console.error('权限请求异常:', error));
-```
 
 如果遇到AndroidManifest合并冲突，在应用的AndroidManifest.xml中添加:
 
